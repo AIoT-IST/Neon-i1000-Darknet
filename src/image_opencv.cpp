@@ -9,10 +9,15 @@
 using namespace cv;
 
 unsigned char* imgBuf;        /* Buffer used for grabbing. */
+unsigned char* imgBuf_gige;        /* gige Buffer used for grabbing. */
 unsigned char* imgBuf_BGR;    /* Buffer used for RGB2BGR convert */
+unsigned char* imgBuf_gige_BGR;    /* gige Buffer used for RGB2BGR convert */
 PYLON_DEVICE_HANDLE hDev;     /* Handle for the pylon device. */
+PYLON_DEVICE_HANDLE hDev_gige;     /* Handle for the pylon gige device. */
 int32_t  payloadSize;         /* Size of an image frame in bytes. */
+int32_t  payloadSize_gige;         /* Size of an image frame in bytes. */
 Mat Mat_Img;
+Mat Mat_Img_gige;
 
 extern "C" {
 
@@ -142,6 +147,7 @@ int Neon_Basler_Init(void)
     GENAPIC_RESULT          res;           /* Return value of pylon methods. */
     size_t                  numDevices;    /* Number of available devices. */
     _Bool                    isAvail;
+    int32_t ImgWidth, ImgHeight;
 
     /* Before using any pylon methods, the pylon runtime must be initialized. */
     PylonInitialize();
@@ -156,6 +162,7 @@ int Neon_Basler_Init(void)
         PylonTerminate();
         return -1;
     }
+	printf("Neon-J: numDevices %d\n", numDevices);
 
     /* Get a handle for the first device found.  */
     res = PylonCreateDeviceByIndex( 0, &hDev );
@@ -217,7 +224,6 @@ int Neon_Basler_Init(void)
         printf("Neon-J: Payload size is %d\n", payloadSize);
     }
 
-    int32_t ImgWidth, ImgHeight;
     if ( PylonDeviceFeatureIsReadable(hDev, "Width") )
     {
         res = PylonDeviceGetIntegerFeatureInt32( hDev, "Width", &ImgWidth );
@@ -245,6 +251,119 @@ int Neon_Basler_Init(void)
     return 0;
 }
 
+int Cam2_Basler_Init(void)
+{
+    GENAPIC_RESULT          res;           /* Return value of pylon methods. */
+    size_t                  numDevices;    /* Number of available devices. */
+    _Bool                    isAvail;
+    int32_t ImgWidth, ImgHeight;
+
+    /* Before using any pylon methods, the pylon runtime must be initialized. */
+    PylonInitialize();
+
+    /* Enumerate all camera devices. You must call
+    PylonEnumerateDevices() before creating a device! */
+    res = PylonEnumerateDevices( &numDevices );
+    if ( 0 == numDevices )
+    {
+        /* Before exiting a program, PylonTerminate() should be called to release
+           all pylon related resources. */
+        PylonTerminate();
+        return -1;
+    }
+	
+////////////////////
+    // for gige camera
+    if ( 2 == numDevices )
+    {
+
+    	res = PylonCreateDeviceByIndex( 1, &hDev_gige );
+	if (res != GENAPI_E_OK) return -1;
+
+    	/* Before using the device, it must be opened. Open it for configuring
+    	parameters and for grabbing images. */
+   	 res = PylonDeviceOpen( hDev_gige, PYLONC_ACCESS_MODE_CONTROL | PYLONC_ACCESS_MODE_STREAM );
+    	if (res != GENAPI_E_OK) return -1;
+	    /* Print out the name of the camera we are using. */
+	    {
+		char buf_gige[256];
+		size_t siz = sizeof(buf_gige);
+		_Bool isReadable_gige;
+
+		isReadable_gige = PylonDeviceFeatureIsReadable(hDev_gige, "DeviceModelName");
+		if ( isReadable_gige )
+		{
+		    res = PylonDeviceFeatureToString(hDev_gige, "DeviceModelName", buf_gige, &siz );
+		    if (res != GENAPI_E_OK) return -1;
+		    printf("Cam2: Using camera %s\n", buf_gige);
+		}
+	    }
+
+	   isAvail = PylonDeviceFeatureIsAvailable( hDev_gige, "EnumEntry_TriggerSelector_FrameStart");
+	    if (isAvail)
+	    {
+		res = PylonDeviceFeatureFromString( hDev_gige, "TriggerSelector", "FrameStart");
+		if (res != GENAPI_E_OK) return -1;
+		res = PylonDeviceFeatureFromString( hDev_gige, "TriggerMode", "Off");
+		if (res != GENAPI_E_OK) return -1;
+		printf("Cam2: Turn TriggerSelector_FrameSatart off\n");
+	    }
+
+	    /* Set pixel format to RGB if available */
+	    isAvail = PylonDeviceFeatureIsAvailable( hDev_gige, "EnumEntry_PixelFormat_RGB8");
+	    if (isAvail)
+	    {
+		res = PylonDeviceFeatureFromString( hDev_gige, "PixelFormat", "RGB8");
+		if (res != GENAPI_E_OK) return -1;
+		printf("Cam2: Set PixelFormat to RGB\n");
+	    }
+
+	    /* Set color space to sRGB if available */
+	    isAvail = PylonDeviceFeatureIsAvailable( hDev_gige, "EnumEntry_BslColorSpaceMode_sRGB");
+	    if (isAvail)
+	    {
+		res = PylonDeviceFeatureFromString( hDev_gige, "BslColorSpaceMode", "sRGB");
+		if (res != GENAPI_E_OK) return -1;
+		printf("Cam2: Set ColorSpaceMode to sRGB\n");
+	    }
+
+	    /* Determine the required size of the grab buffer. */
+	    if ( PylonDeviceFeatureIsReadable(hDev_gige, "PayloadSize") )
+	    {
+		res = PylonDeviceGetIntegerFeatureInt32( hDev_gige, "PayloadSize", &payloadSize_gige );
+		if (res != GENAPI_E_OK) return -1;
+		printf("Cam2: Payload size is %d\n", payloadSize_gige);
+	    }
+
+	    if ( PylonDeviceFeatureIsReadable(hDev_gige, "Width") )
+	    {
+		res = PylonDeviceGetIntegerFeatureInt32( hDev_gige, "Width", &ImgWidth );
+		if (res != GENAPI_E_OK) return -1;
+	    }
+	    if ( PylonDeviceFeatureIsReadable(hDev_gige, "Height") )
+	    {
+		res = PylonDeviceGetIntegerFeatureInt32( hDev_gige, "Height", &ImgHeight );
+		if (res != GENAPI_E_OK) return -1;
+	    }
+	    printf("Cam2: Image width x height is %d x %d\n", ImgWidth, ImgHeight);
+
+	    /* Allocate memory for grabbing. */	    
+	    imgBuf_gige = (unsigned char*) malloc( payloadSize_gige );
+	    imgBuf_gige_BGR = (unsigned char*) malloc( payloadSize_gige );
+	    if ( NULL == imgBuf_gige )
+	    {
+		printf("Cam2: Out of memory.\n" );
+		Cam2_Basler_Terminate();
+		return -1;
+	    }
+
+	    Mat_Img_gige.create(ImgHeight, ImgWidth, CV_8UC3);
+    } //( 2 == numDevices )
+////////////////////
+
+    return 0;
+}
+
 image Neon_Basler_Get_Image(void)
 {
     GENAPIC_RESULT res;           /* Return value of pylon methods. */
@@ -253,9 +372,10 @@ image Neon_Basler_Get_Image(void)
 
        for ( int i=0; i<10; i++ ) {
         res = PylonDeviceGrabSingleFrame(hDev, 0, imgBuf, payloadSize, &grabResult, &bufferReady, 500);
-        //printf("Neon-J: PylonDeviceGrabSingleFrame(), times:%d\n", i+1);
+        printf("Neon-J: PylonDeviceGrabSingleFrame(), times:%d\n", i+1);
+
         if ( grabResult.Status == Grabbed ) {
-            //printf("Neon-J: image grabbed successfully.\n");
+            printf("Neon-J: image grabbed successfully.\n");
             break;
         }
         else
@@ -291,6 +411,53 @@ image Neon_Basler_Get_Image(void)
     }
 }
 
+image Cam2_Basler_Get_Image(void)
+{
+    GENAPIC_RESULT res;           /* Return value of pylon methods. */
+    PylonGrabResult_t grabResult;
+    _Bool bufferReady;
+
+       for ( int i=0; i<10; i++ ) {
+        res = PylonDeviceGrabSingleFrame(hDev_gige, 0, imgBuf_gige, payloadSize_gige, &grabResult, &bufferReady, 500);
+        printf("Neon-J: PylonDeviceGrabSingleFrame(), times:%d\n", i+1);
+
+        if ( grabResult.Status == Grabbed ) {
+            printf("Cam2: image grabbed successfully.\n");
+            break;
+        }
+        else
+            printf("Cam2: image wasn't grabbed successfully(times:%d).  Error code = 0x%08X\n", i+1, 		grabResult.ErrorCode );
+    }
+
+    if ( GENAPI_E_OK == res && !bufferReady )
+    {
+        /* Timeout occurred. */
+        printf("Neon-J: get image timeout\n");
+        return make_empty_image(0,0,0);
+    }
+
+    /* Check to see if the image was grabbed successfully. */
+    if ( grabResult.Status == Grabbed )
+    {
+        // Convert color space from RGB to BGR
+        int w, h;
+        for (h=0; h<grabResult.SizeY; h++)
+            for (w=0; w<grabResult.SizeX; w++)
+            {
+                imgBuf_gige_BGR[3*grabResult.SizeX*h + 3*w]     = imgBuf_gige[3*grabResult.SizeX*h + 3*w + 2];
+                imgBuf_gige_BGR[3*grabResult.SizeX*h + 3*w + 1] = imgBuf_gige[3*grabResult.SizeX*h + 3*w + 1];
+                imgBuf_gige_BGR[3*grabResult.SizeX*h + 3*w + 2] = imgBuf_gige[3*grabResult.SizeX*h + 3*w];
+            }
+        memcpy(Mat_Img_gige.ptr(), imgBuf_gige_BGR, payloadSize_gige);
+        return mat_to_image(Mat_Img_gige);
+    }
+    else //if ( grabResult.Status == Failed )
+    {
+        printf( "Cam2: image wasn't grabbed successfully.  Error code = 0x%08X\n", grabResult.ErrorCode );
+        return make_empty_image(0,0,0);
+    }
+}
+
 void Neon_Basler_Terminate(void)
 {
     PylonDeviceClose( hDev );
@@ -307,6 +474,22 @@ void Neon_Basler_Terminate(void)
     PylonTerminate();
 }
 
+//for gige camera
+void Cam2_Basler_Terminate(void)
+{
+//for gige camera
+    PylonDeviceClose( hDev_gige );
+    PylonDestroyDevice ( hDev_gige );
+
+    if (imgBuf_gige)
+        free( imgBuf_gige );
+    if (imgBuf_gige_BGR)
+        free( imgBuf_gige_BGR );
+
+    /* Shut down the pylon runtime system. Don't call any pylon method after
+       calling PylonTerminate(). */
+    PylonTerminate();
+}
 
 }
 

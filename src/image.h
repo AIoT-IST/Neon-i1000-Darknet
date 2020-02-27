@@ -24,6 +24,11 @@ int show_image_cv(image im, const char* name, int ms);
 int Neon_Basler_Init(void);
 image Neon_Basler_Get_Image(void);
 void Neon_Basler_Terminate(void);
+// For gig camera
+int Cam2_Basler_Init(void);
+image Cam2_Basler_Get_Image(void);
+void Cam2_Basler_Terminate(void);
+
 
 float get_color(int c, int x, int max);
 void draw_box(image a, int x1, int y1, int x2, int y2, float r, float g, float b);

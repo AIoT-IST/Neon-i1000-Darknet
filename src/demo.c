@@ -39,6 +39,7 @@ double demo_time;
 
 detection *get_network_boxes(network *net, int w, int h, float thresh, float hier, int *map, int relative, int *num);
 void demo_Neon_J(char *cfgfile, char *weightfile, float thresh, int cam_index, const char *filename, char **names, int classes, int delay, char *prefix, int avg_frames, float hier, int w, int h, int frames, int fullscreen);
+void demo_Cam2(char *cfgfile, char *weightfile, float thresh, int cam_index, const char *filename, char **names, int classes, int delay, char *prefix, int avg_frames, float hier, int w, int h, int frames, int fullscreen);
 
 int size_network(network *net)
 {
@@ -156,6 +157,53 @@ void *display_in_thread(void *ptr)
     return 0;
 }
 
+//for gige camera
+void *Cam2_detect_in_thread(void *ptr)
+{
+    running = 1;
+    float nms = .4;
+
+    layer l = net->layers[net->n-1];
+    float *X = buff_letter[(buff_index+2)%3].data;
+    network_predict(net, X);
+
+    remember_network(net);
+    detection *dets = 0;
+    int nboxes = 0;
+    dets = avg_predictions(net, &nboxes);
+
+    if (nms > 0) do_nms_obj(dets, nboxes, l.classes, nms);
+
+    printf("\033[2J");
+    printf("\033[1;1H");
+    printf("\nFPS:%.1f\n",fps);
+    printf("Objects:\n\n");
+    image display = buff[(buff_index+2) % 3];
+    draw_detections(display, dets, nboxes, demo_thresh, demo_names, demo_alphabet, demo_classes);
+    free_detections(dets, nboxes);
+
+    demo_index = (demo_index + 1)%demo_frame;
+    running = 0;
+    return 0;
+}
+
+void *Cam2_fetch_in_thread(void *ptr)
+{
+    free_image(buff[buff_index]);
+    if (ptr == NULL)
+        buff[buff_index] = get_image_from_stream(cap);
+    else //if (*(int *)ptr == 1)
+        buff[buff_index] = Cam2_Basler_Get_Image();
+
+    if(buff[buff_index].data == 0) {
+        demo_done = 1;
+        return 0;
+    }
+
+    letterbox_image_into(buff[buff_index], net->w, net->h, buff_letter[buff_index]);
+    return 0;
+}
+
 void *display_loop(void *ptr)
 {
     while(1){
@@ -175,6 +223,11 @@ void demo(char *cfgfile, char *weightfile, float thresh, int cam_index, const ch
     if (strcmp(filename, "Neon-J") == 0)
     {
         demo_Neon_J(cfgfile, weightfile, thresh, cam_index, filename, names, classes, delay, prefix, avg_frames, hier, w, h, frames, fullscreen);
+        return;
+    }
+    else if (strcmp(filename, "Cam2") == 0)
+    {
+        demo_Cam2(cfgfile, weightfile, thresh, cam_index, filename, names, classes, delay, prefix, avg_frames, hier, w, h, frames, fullscreen);
         return;
     }
 
@@ -316,6 +369,78 @@ void demo_Neon_J(char *cfgfile, char *weightfile, float thresh, int cam_index, c
     Neon_Basler_Terminate();
 }
 
+// for gige camera
+void demo_Cam2(char *cfgfile, char *weightfile, float thresh, int cam_index, const char *filename, char **names, int classes, int delay, char *prefix, int avg_frames, float hier, int w, int h, int frames, int fullscreen)
+{
+    //demo_frame = avg_frames;
+    image **alphabet = load_alphabet();
+    demo_names = names;
+    demo_alphabet = alphabet;
+    demo_classes = classes;
+    demo_thresh = thresh;
+    demo_hier = hier;
+    printf("Demo\n");
+    net = load_network(cfgfile, weightfile, 0);
+    set_batch_network(net, 1);
+    pthread_t Cam2_detect_thread;
+    pthread_t Cam2_fetch_thread;
+
+    srand(2222222);
+
+    int i;
+    demo_total = size_network(net);
+    predictions = calloc(demo_frame, sizeof(float*));
+    for (i = 0; i < demo_frame; ++i){
+        predictions[i] = calloc(demo_total, sizeof(float));
+    }
+    avg = calloc(demo_total, sizeof(float));
+    
+    if (Cam2_Basler_Init() == -1)
+    {
+        printf("Cam2: Cam2 device initial...Fail.\n");
+        return;
+    }
+    printf("Cam2: Cam2 device initial...Done.\n");
+    
+    buff[0] = Cam2_Basler_Get_Image();
+    buff[1] = copy_image(buff[0]);
+    buff[2] = copy_image(buff[0]);
+    buff_letter[0] = letterbox_image(buff[0], net->w, net->h);
+    buff_letter[1] = letterbox_image(buff[0], net->w, net->h);
+    buff_letter[2] = letterbox_image(buff[0], net->w, net->h);
+
+    int count = 0;
+    if(!prefix){
+        make_window("Demo", 1352, 1013, fullscreen);
+    }
+
+    demo_time = what_time_is_it_now();
+
+    int demo_device = 1;
+    while(!demo_done){
+        buff_index = (buff_index + 1) %3;
+        if(pthread_create(&Cam2_fetch_thread, 0, Cam2_fetch_in_thread, &demo_device))
+            error("Thread creation failed");
+
+        if(pthread_create(&Cam2_detect_thread, 0, Cam2_detect_in_thread, &demo_device))
+            error("Thread creation failed");
+
+        if(!prefix){
+            fps = 1./(what_time_is_it_now() - demo_time);
+            demo_time = what_time_is_it_now();
+            display_in_thread(0);
+        }else{
+            char name[256];
+            sprintf(name, "%s_%08d", prefix, count);
+            save_image(buff[(buff_index + 1)%3], name);
+        }
+        pthread_join(Cam2_fetch_thread, 0);
+        pthread_join(Cam2_detect_thread, 0);
+        ++count;
+    }
+
+    Cam2_Basler_Terminate();
+}
 
 #else
 void demo(char *cfgfile, char *weightfile, float thresh, int cam_index, const char *filename, char **names, int classes, int delay, char *prefix, int avg, float hier, int w, int h, int frames, int fullscreen)
